@@ -44,7 +44,8 @@ class gantrycontrol:
     self.file_galilpos = fname
 
     print('gclib version:', self.g.GVersion())
-    self.g.GOpen('192.168.42.10 -s ALL')
+    #self.g.GOpen('192.168.42.10 -s ALL')
+    self.g.GOpen('/dev/ttyUSB1')
     print( self.g.GInfo() )
     self.load_position( ) # assume we are at last saved position
 
@@ -128,6 +129,7 @@ class gantrycontrol:
       x_speed = -1000 if RLA_status else 0
       y_speed = -1000 if RLB_status else 0
       z_speed = -1000 if RLC_status else 0
+      #z_speed = -1000 if RLC_status else 0
       print('speed = ',x_speed, y_speed, z_speed)
       command = 'JG %g,%g,%g,%g,%g'% (x_speed, y_speed, z_speed, 0, 0)
       self.c(command)
@@ -161,8 +163,8 @@ class gantrycontrol:
     x=round(x/0.01113)
     y=round(y/0.009382)
     z=round(z/0.009355)
-    phi=round(phi/0.0226)
-    theta=-round(theta*1000/180.)#old value = round(theta/0.02259)
+    phi=round(phi*(10000/180.))#old value = round(phi/0.0226)
+    theta=round(theta*(1000/180.))#old value = round(theta/0.02259)
     
     return x,y,z,phi,theta
 
@@ -171,8 +173,8 @@ class gantrycontrol:
     x = 0.01113*curx
     y = 0.009382*cury
     z = 0.009355*curz
-    phi = 0.0226*curphi
-    theta = -(180./1000)*curtheta#old value = 0.02259*curtheta
+    phi = (180./10000)*curphi#old value = 0.0226*curphi
+    theta = (180./1000)*curtheta#old value = 0.02259*curtheta
     
     return x,y,z,phi,theta
 
