@@ -282,28 +282,70 @@ def get_gantry_setting(r, rc, dc, len_rt, sensor_offset=np.zeros(3), world_to_ga
     return gantry_pos, phi, theta, rt, nt
 
 
-def get_gantry_settings( cam, rvecs, len_rt ):
-    '''
-    Given a vector of scan points in rvecs, get a list of gantry settings.
-    
-    Inputs:
-    cam = camera object
-    rvecs = list of 3-vectors pointing from camera to target
-    
-    Returns:
-    gsettings  = list of gantry settings (xg,yg,zg,phig,thetag) in cm and rad
-    tlocs     = list of target positions (xt,yt,zt,ntx,nty,ntz) in cm and normal vector
-    '''
-    gsettings = []
-    tlocs = []
-    for rv in rvecs:
-        rg, phig, thetag, rt, nt = get_gantry_setting( rv, cam.rc, cam.nc, len_rt )
-        gsettings.append( [rg[0],rg[1],rg[2],phig,thetag] )
-        tlocs.append( [rt[0],rt[1],rt[2],nt[0],nt[1],nt[2]] )
-    return (gsettings, tlocs)
+def get_gantry_settings(cam, scanpts, gantry_to_target_offset_mm):
+    """
+    Compute gantry positions and angles for a list of scan points,
+    accounting for sensor offset along gantry arm so that dryrun and real
+    gantry moves match.
+
+    Parameters
+    ----------
+    cam : camera object
+        Contains camera position (rc) and direction (dc)
+    scanpts : list of np.array
+        List of target positions to scan (LED positions in world frame)
+    gantry_to_target_offset_mm : float
+        Length along gantry x-axis from gantry reference to sensor
+
+    Returns
+    -------
+    gsets : np.array, shape (N, 5)
+        Each row: [x, y, z, phi, theta] with corrected angles
+    tls : np.array
+        Target offsets (unchanged from previous implementation)
+    """
+    gsets = []
+    tls = []
+
+    # Sensor offset in gantry frame
+    sensor_offset = np.array([gantry_to_target_offset_mm, 0.0, 0.0])
+    world_to_gantry_matrix = np.eye(3)  # adjust if gantry axes differ
+
+    for r in scanpts:
+        # Transform target relative to camera
+        rg = transform_camera_to_gantry(coordinate=r, camera_position=cam.rc, camera_direction=cam.n)
+
+        # Compute initial target vector
+        nt = cam.rc - rg
+        nt /= np.linalg.norm(nt)
+
+        # Preliminary phi/theta
+        phig = np.pi/2 + np.arctan2(-nt[1], -nt[0])
+        thetag = np.arcsin(nt[2])
+
+        # Vector along gantry x-axis to target
+        rthat = np.array([np.cos(phig), np.sin(phig), 0])
+        rt = rthat * gantry_to_target_offset_mm
+
+        # Preliminary gantry position
+        gantry_pos = rg - rt
+
+        # --- Correct angles for sensor offset ---
+        gantry_pos, phi, theta, rt_corr, nt_corr = get_gantry_setting(
+            r=np.array(cam.rc),                       # LED/camera target position
+            rc=gantry_pos,                            # gantry reference
+            dc=np.array(cam.n),                       # camera direction
+            len_rt=gantry_to_target_offset_mm,
+            sensor_offset=sensor_offset,
+            world_to_gantry_matrix=world_to_gantry_matrix
+        )
+
+        gsets.append([gantry_pos[0], gantry_pos[1], gantry_pos[2], phi, theta])
+        tls.append([rt_corr[0], rt_corr[1], rt_corr[2], nt_corr[0], nt_corr[1], nt_corr[2]])
+
+    return np.array(gsets), np.array(tls)
                            
 
 
-deg2rad = np.pi / 180.0
-rad2deg = 180.0 / np.pi
+
 
