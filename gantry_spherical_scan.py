@@ -209,26 +209,77 @@ def transform_camera_to_gantry(coordinate, camera_position, camera_direction):
     
     return transformed_coordinate
 
-def get_gantry_setting( r, rc,dc,len_rt ):
-    '''
-    Given desired target position r relative to the camera posiiton at rc, 
-    return the gantry settings (rg,phig,thetag) and 
-    the target location (rt,nt).
-    '''
-    #desired target position relative to gantry coordinate
+deg2rad = np.pi / 180.0
+rad2deg = 180.0 / np.pi
+
+def get_gantry_setting(r, rc, dc, len_rt, sensor_offset=np.zeros(3), world_to_gantry_matrix=np.eye(3)):
+    """
+    Given desired target position r relative to camera position rc,
+    return the gantry settings (gantry_pos, phi, theta) and the target location (rt, nt)
+    accounting for sensor offset at end of gantry arm.
+
+    Parameters
+    ----------
+    r : np.array
+        Target position in world coordinates (e.g., LED position)
+    rc : np.array
+        Camera position in world coordinates
+    dc : np.array
+        Camera direction vector
+    len_rt : float
+        Scalar distance along the target vector
+    sensor_offset : np.array
+        Sensor offset in gantry local frame (x-forward, y-left, z-up)
+    world_to_gantry_matrix : np.array
+        Rotation matrix from world to gantry frame
+
+    Returns
+    -------
+    gantry_pos : np.array
+        Gantry reference position in world coordinates
+    phi : float
+        Gantry yaw angle (rad)
+    theta : float
+        Gantry pitch angle (rad)
+    rt : np.array
+        Vector along gantry x-axis to sensor (length len_rt)
+    nt : np.array
+        Normalized pointing vector from sensor to target
+    """
+    # Transform target position from camera frame to gantry frame
     rg = transform_camera_to_gantry(coordinate=r, camera_position=rc, camera_direction=dc)
-    
-    nt = (rc-rg)
-    nt = nt/np.linalg.norm(nt) # target normal
-    phig = np.pi/2 + np.arctan2( -nt[1], -nt[0] )
-    thetag = np.arcsin( nt[2] )
-    
-    rthat = np.array( [ np.cos(phig), np.sin(phig), 0 ] )                                                                                     
-    rt = np.multiply(rthat, len_rt)
-    
-    gantry_pos = rg-rt
-    #print('rg=',rg,'rc=',rc,'r=',r,'rt=',rt)
-    return (gantry_pos, phig, thetag, rt,nt) 
+
+    # Initial vector from gantry reference to target (LED)
+    nt = rc - rg
+    nt /= np.linalg.norm(nt)
+
+    # Compute preliminary gantry angles in world frame
+    phig = np.pi/2 + np.arctan2(-nt[1], -nt[0])
+    thetag = np.arcsin(nt[2])
+
+    # Compute vector along gantry x-axis of length len_rt
+    rthat = np.array([np.cos(phig), np.sin(phig), 0])
+    rt = rthat * len_rt
+
+    # Compute preliminary gantry position
+    gantry_pos = rg - rt
+
+    # --- Correct for sensor offset ---
+    # Sensor world position
+    sensor_world_pos = gantry_pos + world_to_gantry_matrix.T.dot(sensor_offset)
+
+    # Recompute vector from sensor to LED
+    nt = rc - sensor_world_pos
+    nt /= np.linalg.norm(nt)
+
+    # Convert to gantry frame
+    nt_gantry = world_to_gantry_matrix.dot(nt)
+
+    # Recompute gantry Euler angles
+    phi = np.arctan2(nt_gantry[1], nt_gantry[0])
+    theta = np.arcsin(-nt_gantry[2])
+
+    return gantry_pos, phi, theta, rt, nt
 
 
 def get_gantry_settings( cam, rvecs, len_rt ):
@@ -255,45 +306,4 @@ def get_gantry_settings( cam, rvecs, len_rt ):
 
 deg2rad = np.pi / 180.0
 rad2deg = 180.0 / np.pi
-
-def compute_gantry_angles(gantry_ref_pos, sensor_offset, led_pos, world_to_gantry_matrix=np.eye(3)):
-    """
-    Compute gantry angles (phi, theta) to point the sensor at the LED.
-    
-    Parameters
-    ----------
-    gantry_ref_pos : np.array, shape (3,)
-        Gantry reference point in world coordinates.
-    sensor_offset : np.array, shape (3,)
-        Sensor offset in gantry local coordinates (x-forward, y-left, z-up).
-    led_pos : np.array, shape (3,)
-        LED position in world coordinates.
-    world_to_gantry_matrix : np.array, shape (3,3)
-        Rotation matrix from world frame to gantry frame.
-    
-    Returns
-    -------
-    phi : float
-        Gantry yaw angle (degrees)
-    theta : float
-        Gantry pitch angle (degrees)
-    sensor_world_pos : np.array, shape(3,)
-        Sensor world coordinates
-    """
-    # Sensor position in world coordinates
-    sensor_world_pos = gantry_ref_pos + world_to_gantry_matrix.T @ sensor_offset
-    
-    # Vector from sensor to LED
-    vec_to_led = led_pos - sensor_world_pos
-    vec_to_led /= np.linalg.norm(vec_to_led)
-    
-    # Transform vector to gantry frame
-    vec_gantry = world_to_gantry_matrix @ vec_to_led
-    
-    # Compute Euler angles in gantry frame
-    phi = np.arctan2(vec_gantry[1], vec_gantry[0]) * rad2deg      # yaw
-    theta = np.arcsin(-vec_gantry[2]) * rad2deg                    # pitch
-
-    return phi, theta, sensor_world_pos
-
 
