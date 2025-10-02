@@ -1,0 +1,10 @@
+# Small test scan for verifying gantry pointing
+Nscan     = 5                   # Number of scan points
+Rscan     = 450                 # Distance from camera to target (mm)
+ledpos    = 800, 500, -600      # Camera position (mm)
+ledfacing = 0.0, -1.0, 0.0      # Camera facing direction
+phimin    = -45                  # Minimum azimuth (deg)
+phimax    = 45                   # Maximum azimuth (deg)
+thetamin  = 30                   # Minimum elevation (deg)
+thetamax  = 60                   # Maximum elevation (deg)
+interval  = 5                    # Data collection time at each point (s)
