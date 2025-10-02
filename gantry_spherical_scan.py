@@ -179,107 +179,114 @@ def cross_product(v1, v2):
 #See LookAt matrix https://learnopengl.com/Getting-started/Camera. The transformation we are doing is inverse of LookAt matrix.
 #Make sure the camera Pitch doesn't exceed +-90 degrees.
 #If Pitch exceede +- 90 degrees, up should be redefined to respective upwards direction
-def transform_camera_to_gantry(coordinate, camera_position, camera_direction):
-    up = np.array([0, 0, 1])
-    
-    # Compute camera axes
-    camera_left = cross_product(up, camera_direction)  # camera y-axis
-    camera_up = cross_product(camera_direction, camera_left)  # camera z axis
-    
-    # Normalize camera axes
+def transform_camera_to_gantry(coordinate, camera_position, camera_direction,
+                               sensor_offset=None, world_to_gantry_matrix=None):
+    """
+    Transform a point from camera frame to gantry/world frame.
+
+    Parameters
+    ----------
+    coordinate : np.array
+        Point in camera coordinates
+    camera_position : np.array
+        Camera position in world/gantry frame
+    camera_direction : np.array
+        Camera forward direction (normalized)
+    sensor_offset : np.array, optional
+        Offset of sensor along gantry arm in gantry frame
+    world_to_gantry_matrix : np.array, optional
+        Rotation from world frame to gantry frame
+
+    Returns
+    -------
+    transformed_coordinate : np.array
+        Point in gantry/world frame, including sensor offset if given
+    """
+    if sensor_offset is None:
+        sensor_offset = np.zeros(3)
+    if world_to_gantry_matrix is None:
+        world_to_gantry_matrix = np.eye(3)
+
+    # --- compute camera axes ---
+    up = np.array([0,0,1])
+    camera_left = cross_product(up, camera_direction)
+    camera_up   = cross_product(camera_direction, camera_left)
+
     x_hat = normalize(camera_direction)
     y_hat = normalize(camera_left)
     z_hat = normalize(camera_up)
-    
 
-    # Rotation matrix
-    R_mat = np.array([
-        [x_hat[0], y_hat[0], z_hat[0]],
-        [x_hat[1], y_hat[1], z_hat[1]],
-        [x_hat[2], y_hat[2], z_hat[2]]
-    ])
-    
-    
-    # Translation vector
-    t_vec = np.array(camera_position)
-    
-    # Transform the coordinate
-    coordinate = np.array(coordinate)
-    transformed_coordinate = R_mat.dot(coordinate) + t_vec
-    
-    return transformed_coordinate
+    # Rotation matrix from camera frame to gantry/world frame
+    R_cam = np.column_stack((x_hat, y_hat, z_hat))
+
+    # Transform coordinate
+    coord = np.array(coordinate)
+    transformed = R_cam.dot(coord) + camera_position
+
+    # Apply sensor offset in gantry frame
+    transformed += sensor_offset
+
+    # Apply optional world-to-gantry rotation
+    transformed = world_to_gantry_matrix.dot(transformed)
+
+    return transformed
 
 deg2rad = np.pi / 180.0
 rad2deg = 180.0 / np.pi
 
-def get_gantry_setting(r, rc, dc, len_rt, sensor_offset=np.zeros(3), world_to_gantry_matrix=np.eye(3)):
+def get_gantry_setting(target_cam, cam_pos, cam_dir, sensor_offset=np.zeros(3), world_to_gantry_matrix=None):
     """
-    Given desired target position r relative to camera position rc,
-    return the gantry settings (gantry_pos, phi, theta) and the target location (rt, nt)
-    accounting for sensor offset at end of gantry arm.
+    Compute gantry position and pointing angles for a target seen by a stationary camera.
 
     Parameters
     ----------
-    r : np.array
-        Target position in world coordinates (e.g., LED position)
-    rc : np.array
-        Camera position in world coordinates
-    dc : np.array
-        Camera direction vector
-    len_rt : float
-        Scalar distance along the target vector
-    sensor_offset : np.array
-        Sensor offset in gantry local frame (x-forward, y-left, z-up)
-    world_to_gantry_matrix : np.array
-        Rotation matrix from world to gantry frame
+    target_cam : np.array
+        Target position in camera frame
+    cam_pos : np.array
+        Camera position in gantry/world frame
+    cam_dir : np.array
+        Camera forward direction (normalized)
+    sensor_offset : np.array, optional
+        Offset of sensor/LED from gantry end in gantry frame
+    world_to_gantry_matrix : np.array, optional
+        Rotation from world frame to gantry frame
 
     Returns
     -------
     gantry_pos : np.array
-        Gantry reference position in world coordinates
-    phi : float
-        Gantry yaw angle (rad)
-    theta : float
-        Gantry pitch angle (rad)
-    rt : np.array
-        Vector along gantry x-axis to sensor (length len_rt)
-    nt : np.array
-        Normalized pointing vector from sensor to target
+        Gantry XYZ position
+    phig : float
+        Gantry azimuth angle (radians)
+    thetag : float
+        Gantry elevation angle (radians)
+    rt_corr : np.array
+        Target position relative to gantry after sensor offset
+    nt_corr : np.array
+        Target pointing unit vector
     """
-    # Transform target position from camera frame to gantry frame
-    rg = transform_camera_to_gantry(coordinate=r, camera_position=rc, camera_direction=dc)
+    # Transform target to gantry/world frame
+    rg = transform_camera_to_gantry(
+        coordinate=target_cam,
+        camera_position=cam_pos,
+        camera_direction=cam_dir,
+        sensor_offset=sensor_offset,
+        world_to_gantry_matrix=world_to_gantry_matrix
+    )
 
-    # Initial vector from gantry reference to target (LED)
-    nt = rc - rg
-    nt /= np.linalg.norm(nt)
+    # Compute pointing vector from sensor to target (unit vector)
+    nt_corr = cam_pos - rg
+    nt_corr /= np.linalg.norm(nt_corr)
 
-    # Compute preliminary gantry angles in world frame
-    phig = np.pi/2 + np.arctan2(-nt[1], -nt[0])
-    thetag = np.arcsin(nt[2])
+    # Compute gantry angles in gantry frame
+    phig   = np.pi/2 + np.arctan2(-nt_corr[1], -nt_corr[0])   # azimuth
+    thetag = np.arcsin(nt_corr[2])                             # elevation
 
-    # Compute vector along gantry x-axis of length len_rt
-    rthat = np.array([np.cos(phig), np.sin(phig), 0])
-    rt = rthat * len_rt
+    # Compute target relative to gantry (used for quiver plot)
+    rt_corr = nt_corr  # already unit vector; length can be scaled in plot
 
-    # Compute preliminary gantry position
-    gantry_pos = rg - rt
+    gantry_pos = rg - rt_corr  # final gantry position
 
-    # --- Correct for sensor offset ---
-    # Sensor world position
-    sensor_world_pos = gantry_pos + world_to_gantry_matrix.T.dot(sensor_offset)
-
-    # Recompute vector from sensor to LED
-    nt = rc - sensor_world_pos
-    nt /= np.linalg.norm(nt)
-
-    # Convert to gantry frame
-    nt_gantry = world_to_gantry_matrix.dot(nt)
-
-    # Recompute gantry Euler angles
-    phi = np.arctan2(nt_gantry[1], nt_gantry[0])
-    theta = np.arcsin(-nt_gantry[2])
-
-    return gantry_pos, phi, theta, rt, nt
+    return gantry_pos, phig, thetag, rt_corr, nt_corr
 
 
 def get_gantry_settings(cam, scanpts, gantry_to_target_offset_mm,
