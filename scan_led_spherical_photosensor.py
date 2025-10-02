@@ -114,29 +114,22 @@ class Parameters:
 
 def plot_scan(c1, gsets, tls):
     npgsets = np.array(gsets)
-    GX = npgsets.T[0]
-    GY = npgsets.T[1]
-    GZ = npgsets.T[2]
-    Gphi = npgsets.T[3]
-    Gtheta = npgsets.T[4]
+    GX, GY, GZ, Gphi, Gtheta = npgsets.T
 
     nptls = np.array(tls)
-    TX = nptls.T[0]
-    TY = nptls.T[1]
-    TZ = nptls.T[2]
-    NX = nptls.T[3]
-    NY = nptls.T[4]
-    NZ = nptls.T[5]
+    # Target offset position relative to gantry
+    TX, TY, TZ = nptls[:,0], nptls[:,1], nptls[:,2]
+    # Target pointing direction (normalized)
+    NX, NY, NZ = nptls[:,3], nptls[:,4], nptls[:,5]
 
-    # Step numbers for coloring
     steps = np.arange(len(GX))
 
     # --- Gantry position plot ---
-    fig = plt.figure(figsize=(3,3), dpi=100)
+    fig = plt.figure(figsize=(5,5), dpi=120)
     ax = fig.add_subplot(projection='3d')
-    ax.plot(GX, GY, GZ, color='lightgray')  # path in light gray
-    sc = ax.scatter(GX, GY, GZ, c=steps, cmap='viridis', marker='.')
-    ax.scatter(c1.rc[0], c1.rc[1], c1.rc[2], marker='o', color='red')
+    ax.plot(GX, GY, GZ, color='lightgray', alpha=0.5)  # path in light gray
+    sc = ax.scatter(GX, GY, GZ, c=steps, cmap='viridis', marker='o', s=20)
+    ax.scatter(c1.rc[0], c1.rc[1], c1.rc[2], marker='*', color='red', s=100)
     ax.set_xlabel('xg (mm)')
     ax.set_ylabel('yg (mm)')
     ax.set_zlabel('zg (mm)')
@@ -145,21 +138,32 @@ def plot_scan(c1, gsets, tls):
     plt.savefig('gantrypos_led.png')
 
     # --- Target position and pointing plot ---
-    fig = plt.figure(figsize=(3,3), dpi=100)
+    fig = plt.figure(figsize=(5,5), dpi=120)
     ax = fig.add_subplot(projection='3d')
-    ax.quiver(GX+TX, GY+TY, GZ+TZ, NX, NY, NZ, length=50.0)
-    sc = ax.scatter(GX+TX, GY+TY, GZ+TZ, c=steps, cmap='viridis', marker='.')
-    ax.scatter(c1.rc[0], c1.rc[1], c1.rc[2], marker='o', color='red')
-    ax.set_xlabel('xg+xt (mm)')
-    ax.set_ylabel('yg+yt (mm)')
-    ax.set_zlabel('zg+zt (mm)')
+    # Arrow length can be reduced for clarity if many points
+    arrow_length = 30.0
+    arrow_width = 2.0
+
+    for i in range(len(GX)):
+        ax.quiver(GX[i]+TX[i], GY[i]+TY[i], GZ[i]+TZ[i],
+                  NX[i], NY[i], NZ[i],
+                  length=arrow_length, normalize=True,
+                  color=cmap(steps[i]/len(GX)), linewidth=arrow_width)
+
+    sc = ax.scatter(GX+TX, GY+TY, GZ+TZ, c=steps, cmap=cmap, marker='o', s=20)
+    ax.scatter(c1.rc[0], c1.rc[1], c1.rc[2], marker='*', color='red', s=100)
+    ax.set_xlabel('x (mm)')
+    ax.set_ylabel('y (mm)')
+    ax.set_zlabel('z (mm)')
     ax.set_title('Target position and pointing')
     fig.colorbar(sc, ax=ax, label='Step number')
+    plt.tight_layout()
     plt.savefig('gantrypospnt_led.png')
 
     print('min Gx=', np.min(GX), ' max Gx=', np.max(GX))
     print('min Gy=', np.min(GY), ' max Gy=', np.max(GY))
     print('min Gz=', np.min(GZ), ' max Gz=', np.max(GZ))
+
 
 # =====================================================================================
 def main():
@@ -175,8 +179,10 @@ def main():
     param  = Parameters( args.param_file )
     cam    = camera( param.ledpos, param.ledfacing ) # bad name (sorry)
     scanpts = cam.get_scanpoints( param.Nscan, param.Rscan, param.phimin, param.phimax, param.thetamin, param.thetamax  )
-    gantry_to_target_offset_mm = 50 #140 #218
-    gsets, tls = get_gantry_settings( cam, scanpts, gantry_to_target_offset_mm )
+    sensor_offset = np.array([50.0, 50.0, 0.0])          # along gantry x-axis and y-axis
+    world_to_gantry_matrix = np.eye(3)                  # identity if axes align
+
+    gsets, tls = get_gantry_settings( cam, scanpts, sensor_offset, world_to_gantry_matrix )
 
     print('Dryrun=',args.dryrun)
     if args.dryrun == True:
@@ -200,8 +206,8 @@ def main():
         print('move',n,'to',gset)
         cur_move_start = time.time()
         curx, cury, curz, curphi, curtheta = gset
-        curphi*=-rad2deg
-        curtheta*=-rad2deg
+        curphi*=rad2deg
+        curtheta*=rad2deg
         
         gantry.move( "DM", "DM", curz )
         gantry.move( curx, cury,"DM",curphi,curtheta,1000,1000,1000,200,200)
